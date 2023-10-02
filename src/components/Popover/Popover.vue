@@ -45,12 +45,14 @@
 
 <script lang="ts">
 import {
-  type Instance,
-  type OptionsGeneric,
-  type State as PopperState,
-  type PositioningStrategy,
-  createPopper,
-} from '@popperjs/core';
+  type Placement,
+  type Strategy,
+  computePosition,
+  autoUpdate,
+  flip,
+  shift,
+  limitShift,
+} from '@floating-ui/dom';
 import {
   computed,
   defineComponent,
@@ -82,7 +84,7 @@ export default defineComponent({
     let timeout: number | undefined = undefined;
     const popoverRef = ref<HTMLElement>();
     let resizeObserver: ResizeObserver | null = null;
-    let popper: Instance | null = null;
+    let popper: Function | null = null;
 
     const state: PopoverState = reactive({
       isVisible: false,
@@ -99,73 +101,37 @@ export default defineComponent({
       isFocused: false,
       autoHide: false,
       force: false,
+      elements: null,
     });
 
     function updateDirection(placement?: string) {
       if (placement) state.direction = placement.split('-')[0];
     }
 
-    function onPopperUpdate({ placement, options }: Partial<PopperState>) {
-      updateDirection(placement || options?.placement);
-    }
-
-    const popperOptions = computed<Partial<OptionsGeneric<any>>>(() => {
-      return {
-        placement: state.placement,
-        strategy: (state.positionFixed
-          ? 'fixed'
-          : 'absolute') as PositioningStrategy,
-        boundary: '',
-        modifiers: [
-          {
-            name: 'onUpdate',
-            enabled: true,
-            phase: 'afterWrite',
-            fn: onPopperUpdate,
-          },
-          ...(state.modifiers || []),
-        ],
-        onFirstUpdate: onPopperUpdate,
-      };
-      // if (props.boundarySelector) {
-      //   const boundary = document.querySelector(props.boundarySelector);
-      //   modifiers.push({
-      //     name: 'boundary',
-      //     enabled: true,
-      //     phase: 'main',
-      //     requiresIfExists: ['offset'],
-      //     fn({ state }) {
-      //       console.log(
-      //         detectOverflow(state, {
-      //           boundary,
-      //           altBoundary: true,
-      //         }),
-      //       );
-      //     },
-      //   });
-      // }
-    });
-
     const alignment = computed(() => {
-      const isLeftRight =
-        state.direction === 'left' || state.direction === 'right';
+      const isLeftRight = state.direction === 'left' || state.direction === 'right';
+
       let alignment = '';
+
       if (state.placement) {
         const parts = state.placement.split('-');
         if (parts.length > 1) alignment = parts[1];
       }
+
       if (['start', 'top', 'left'].includes(alignment)) {
         return isLeftRight ? 'top' : 'left';
+
       }
       if (['end', 'bottom', 'right'].includes(alignment)) {
         return isLeftRight ? 'bottom' : 'right';
       }
+
       return isLeftRight ? 'middle' : 'center';
     });
 
     function destroyPopper() {
       if (popper) {
-        popper.destroy();
+        popper();
         popper = null;
       }
     }
@@ -173,18 +139,32 @@ export default defineComponent({
     function setupPopper() {
       nextTick(() => {
         const el = resolveEl(state.target);
+
         if (!el || !popoverRef.value) return;
-        if (popper && popper.state.elements.reference !== el) {
-          destroyPopper();
-        }
+
+        if (popper && state.elements?.reference !== el) destroyPopper();
+
         if (!popper) {
-          popper = createPopper(
-            el as Element,
-            popoverRef.value,
-            popperOptions.value,
-          );
+          popper = autoUpdate(el as Element, popoverRef.value, () => {
+            computePosition(
+              el as Element,
+              popoverRef.value as HTMLElement, {
+                placement: state.placement as Placement,
+                strategy: (state.positionFixed ? 'fixed' : 'absolute') as Strategy,
+                middleware: [shift({ limiter: limitShift() }), flip()],
+              },
+            ).then(({ x, y, placement }) => {
+              state.elements = { popper: el, reference: popoverRef.value };
+              updateDirection(placement);
+
+              Object.assign((popoverRef.value as HTMLElement).style, {
+                left: `${x}px`,
+                top: `${y}px`,
+              });
+            });
+          });
         } else {
-          popper.update();
+          popper();
         }
       });
     }
@@ -204,8 +184,11 @@ export default defineComponent({
 
     function isCurrentTarget(target: unknown) {
       if (!target || !popper) return false;
+
       const el = resolveEl(target);
-      return el === popper.state.elements.reference;
+      const popperRef = state.elements?.reference;
+
+      return el === popperRef;
     }
 
     async function show(opts: Partial<PopoverOptions> = {}) {
@@ -248,7 +231,9 @@ export default defineComponent({
 
     function onDocumentClick(e: CustomEvent) {
       if (!popper) return;
-      const popperRef = popper.state.elements.reference;
+
+      const popperRef = state.elements?.reference;
+
       if (!popoverRef.value || !popperRef) {
         return;
       }
@@ -337,7 +322,9 @@ export default defineComponent({
     function onMouseLeave() {
       state.isHovered = false;
       if (!popper) return;
-      const popperRef = popper.state.elements.reference;
+
+      const popperRef = state.elements?.reference;
+
       if (
         state.autoHide &&
         !state.isFocused &&
@@ -382,12 +369,15 @@ export default defineComponent({
         cleanupRO();
         if (!val) return;
         resizeObserver = new ResizeObserver(() => {
-          if (popper) popper.update();
+          if (popper) popper();
         });
         resizeObserver.observe(val);
       },
     );
 
+    /**
+     * Since the direction update are handled by the middleware, this watcher can be omitted.
+     */
     watch(() => state.placement, updateDirection, {
       immediate: true,
     });

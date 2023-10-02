@@ -18,6 +18,11 @@ export interface PopoverOptions {
   hideDelay: number;
 }
 
+export interface PopoverElements {
+  popper: Node | undefined;
+  reference: HTMLElement | undefined;
+}
+
 export interface PopoverState {
   isVisible: boolean;
   target: unknown;
@@ -33,6 +38,7 @@ export interface PopoverState {
   isFocused: boolean;
   autoHide: boolean;
   force: boolean;
+  elements: PopoverElements | null;
 }
 
 export interface PopoverEvent {

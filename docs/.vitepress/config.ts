@@ -125,6 +125,15 @@ function sidebar() {
         ],
       },
       {
+        text: 'Playground',
+        items: [
+          {
+            text: 'Floating UI',
+            link: '/playground/floating-ui',
+          },
+        ],
+      },
+      {
         text: 'i18n',
         items: [
           {
